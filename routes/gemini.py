@@ -8,6 +8,7 @@ import io
 import aiohttp
 from dotenv import load_dotenv
 
+
 load_dotenv()
 
 ai = Client()
@@ -59,7 +60,7 @@ async def generate_image(product_images: Annotated[list[str], Form()],
             
         return Response(content=current_image_base64, media_type=current_image_mime_type)
     except Exception as e:
-        return {"error": str(e)}
+         raise HTTPException(500, str(e))
     
 
 @router.post("/generateImage1")
@@ -74,21 +75,39 @@ async def generate_image1(product_images: Annotated[list[str], Form()],
             async with aiohttp.ClientSession() as session:
                 async with session.get(product_image_url) as resp:
                     product_image_content = await resp.read()
-            
+                    product_image_mime_type = resp.content_type
+                    
+            product_part = Part(
+                inline_data=Blob(
+                    data=product_image_content,
+                    mime_type=product_image_mime_type,
+                )
+            ) 
+
+            person_part = Part(
+                inline_data=Blob(
+                    data=current_image_base64,
+                    mime_type=current_image_mime_type,
+                )
+            )
+            print(product_image_mime_type)
             response = ai.models.recontext_image(
                 model="virtual-try-on-preview-08-04",
                 source=RecontextImageSource(
-                    person_image=AIImage(image_bytes=user_image_content),
+                    person_image= person_part.as_image(),
                     product_images=[
-                        ProductImage(product_image=AIImage(image_bytes=product_image_content))
+                        ProductImage(product_image=product_part.as_image())
                     ],
                 ),
             )
             
             if response.generated_images and len(response.generated_images) > 0:
-                generated_image = response.generated_images[0].image
-                current_image_base64 = generated_image.image_bytes
-                current_image_mime_type = generated_image.mime_type
+                # Safely obtain the image object; some responses may have None for .image
+                first = response.generated_images[0]
+                generated_image = getattr(first, "image", None) or getattr(first, "generated_image", None)
+                if generated_image and getattr(generated_image, "image_bytes", None):
+                    current_image_base64 = generated_image.image_bytes
+                    current_image_mime_type = getattr(generated_image, "mime_type", current_image_mime_type)
 
             
         return Response(content=current_image_base64, media_type=current_image_mime_type)
